@@ -1,0 +1,315 @@
+{
+  "name": "IIT-Final-Project",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Stock details",
+        "formDescription": "Provide symbol of stock you want to check:",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "stock_symbol",
+              "placeholder": "=eg.: IBM",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.3,
+      "position": [
+        -224,
+        -128
+      ],
+      "id": "e4fc3322-74c3-442c-9716-034df5cd99fa",
+      "name": "User Input",
+      "webhookId": "37227035-d426-4079-99be-a688c15c02c2",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "url": "=https://www.alphavantage.co/query?function=TIME_SERIES_WEEKLY&symbol={{ $json.query.symbol }}&apikey=demo",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        64,
+        272
+      ],
+      "id": "89c1cf8b-4792-455a-98a7-87db56291ee7",
+      "name": "Request Stock Data",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "let result = Object();\nlet weeks = $json['Weekly Time Series'];\nlet requested_timespan_weeks = $('Webhook').first().json.query.timespan;\n\nif(requested_timespan_weeks > 52 || requested_timespan_weeks < 2){\n  requested_timespan_weeks =5;\n}\n\nlet last_month = Object.keys(weeks).slice(0,requested_timespan_weeks);\n\nconsole.log(requested_timespan_weeks);\nconsole.log(weeks);\nconsole.log(last_month);\n\n/* Assings symbol and last refresh date to the result */\nresult.symbol = $json['Meta Data']['2. Symbol'];\nresult.last_refresh = $json['Meta Data']['3. Last Refreshed'];\n\n/* Assigns data to an array of last 5 weeks data */\nresult.week_data = Array();\nlast_month.forEach((week,index) =>{\n    result.week_data += (\"(WEEK:\" + last_month[index]    \n        + \"|OPEN:\" + weeks[week][\"1. open\"] \n        + \"|HIGH:\" + weeks[week][\"2. high\"]\n        + \"|LOW:\" + weeks[week][\"3. low\"]\n        + \"|CLOSE:\" + weeks[week][\"4. close\"]\n        + \"|VOLUME:\" + weeks[week][\"5. volume\"] + \")\"\n        );\n})\n\nreturn result;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        256,
+        112
+      ],
+      "id": "8cbd30fe-42a3-42e4-96f4-a59e50c0296b",
+      "name": "Process Stock Data",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "=content-type",
+              "value": "=application/json"
+            },
+            {
+              "name": "=Authorization",
+              "value": "=Bearer {{$env.API_KEY}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n\"model\": \"openai/gpt-oss-20b\",\n\"stream\": false,\n\"temperature\": 1.0,\n\"messages\": [\n  {\"role\": \"system\", \"content\": \"You are an advisor, that is prodive short raports on stock info, based only on data provided. Remember, weeks are sorted from the most recent ones, so do all compare operations from last index to first index. Response must be pure JSON, without any addons, nor formatting, except using % and +- sings.\" },\n  {\n    \"role\": \"user\", \"content\": \"Symbol: {{ $json.symbol }}, Last refresh: {{ $json.last_refresh }}, Week data: {{ $json.week_data }}. JSON keys expected are: stock_symbol, last_refresh_date, total_timespan_volume (volume traded during all weeks summed up), highest_open, lowest_open, highest_close, lowest_close, weekly_changes_array (in %, compares WEEK, with the WEEK below and then does the same for the WEEK BELOW, make it an assoc array, where index is WEEK/WEEKBELOW date), change_last_month_lows_array (in %, compares WEEK0 LOW value to WEEK4 LOW value, and if possible repeats for WEEK(n) compared to WEEK(n+4), starting from n=4), change_last_month_highs_array (in %, compares WEEK0 HIGH value to WEEK4 HIGH value, and if possible repeats for WEEK(n) compared to WEEK(n+4), starting from n=4), risk (from 1 to 10) short_summary (Like 3-8 sentences, why such risk rating was chosen).\"\n  }\n]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        432,
+        256
+      ],
+      "id": "f6a9eb0f-8232-4213-924a-a60153aa8dc1",
+      "name": "Prompt to Chat GPT",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "let response = $input.first().json.choices[0].message.content;\nlet JSON_parsed_response = JSON.parse(response);\nreturn JSON_parsed_response;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        576,
+        96
+      ],
+      "id": "c0a60b9a-f20c-4b9b-8ff3-4e8e5f0f7321",
+      "name": "Trim Response JSON",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "console.log(\"HTTP Error\");\nreturn {};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        688,
+        432
+      ],
+      "id": "87ff5b40-5b3f-4613-849c-44fde4f1ef49",
+      "name": "HTTP Error"
+    },
+    {
+      "parameters": {
+        "jsCode": "console.log(\"JS Error\");\n\nreturn {};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        688,
+        -96
+      ],
+      "id": "587cb15f-f5f4-44e9-af9b-cba66ada30e3",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "errorMessage": "Error While Working on the response"
+      },
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        848,
+        -96
+      ],
+      "id": "b55102c1-6fb3-42e1-a448-ac6880584ea0",
+      "name": "Stop and Error"
+    },
+    {
+      "parameters": {
+        "errorMessage": "HTTP request didn't come through"
+      },
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        848,
+        432
+      ],
+      "id": "d601e269-5c1c-4741-a848-898c49799375",
+      "name": "Stop and Error1"
+    },
+    {
+      "parameters": {
+        "path": "=stock_info",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -208,
+        272
+      ],
+      "id": "c6ad2fb0-df70-4bdf-a887-4a54582edfa9",
+      "name": "Webhook",
+      "webhookId": "c7f031cb-24a9-4578-895e-23f4bdbe7605"
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        848,
+        80
+      ],
+      "id": "da415704-fb2f-40ee-b5c1-c0b89e5b92e9",
+      "name": "Respond to Webhook"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "User Input": {
+      "main": [
+        []
+      ]
+    },
+    "Request Stock Data": {
+      "main": [
+        [
+          {
+            "node": "Process Stock Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Stock Data": {
+      "main": [
+        [
+          {
+            "node": "Prompt to Chat GPT",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prompt to Chat GPT": {
+      "main": [
+        [
+          {
+            "node": "Trim Response JSON",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Stop and Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Error": {
+      "main": [
+        [
+          {
+            "node": "Stop and Error1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trim Response JSON": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Request Stock Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "e16fbdd8-8206-4bbb-8978-6888cd3b42c3",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "0929741336c64f5d7b4531f0ecc26f67850893b0ea63f5f360f0944468e79892"
+  },
+  "id": "xTbviPUwlyySY83K",
+  "tags": []
+}
